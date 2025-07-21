@@ -2,6 +2,12 @@
 name = "snd"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [dependencies]
 colored = "3.0.0"
+if-addrs = "0.14.0"
+gethostname = "1.0.2"
+
+[build-dependencies]
+cmake = "0.1.54"
