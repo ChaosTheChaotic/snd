@@ -22,9 +22,33 @@ struct DM {
     file_size: u64,
 }
 
+
+fn human_readable_size(size: u64) -> String {
+    const UNITS: [&str; 6] = ["bytes", "KB", "MB", "GB", "TB", "PB"];
+    let mut size = size as f64;
+    let mut unit_index = 0;
+
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{:.0} {}", size, UNITS[unit_index])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_index])
+    }
+}
+
 impl fmt::Display for DM {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "From {} with ip {} and {}: {} with size (megs) {}", self.host_info.name, self.host_info.ip, self.file_type, self.file_path, self.file_size )
+        let size_str = human_readable_size(self.file_size);
+        write!(f, "From {} with ip {} and {}: {} with size {}", 
+            self.host_info.name, 
+            self.host_info.ip, 
+            self.file_type, 
+            self.file_path, 
+            size_str)
     }
 }
 
