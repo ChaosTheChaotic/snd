@@ -1,8 +1,48 @@
+use dirs::{config_dir, download_dir};
 use gethostname::gethostname;
 use std::{
-    env, ffi::OsStr, fs::File, path::{Path, PathBuf}
+    env,
+    ffi::OsStr,
+    fs::{create_dir_all, read_to_string, write, File},
+    path::{Path, PathBuf},
 };
-use dirs::download_dir;
+
+pub struct Config {
+    pub send_method: String,
+}
+
+pub fn get_config_path() -> PathBuf {
+    let mut path = config_dir().expect("Could not find config directory");
+    path.push("snd");
+    path.push("config.conf");
+    path
+}
+
+pub fn read_config() -> Config {
+    let path = get_config_path();
+    if path.exists() {
+        if let Ok(contents) = read_to_string(&path) {
+            for line in contents.lines() {
+                if let Some(value) = line.strip_prefix("send_method = ") {
+                    return Config {
+                        send_method: value.trim().to_string(),
+                    };
+                }
+            }
+        }
+    }
+    Config {
+        send_method: "semi-reliable".to_string(),
+    }
+}
+
+pub fn write_config(config: &Config) -> std::io::Result<()> {
+    let path = get_config_path();
+    if let Some(parent) = path.parent() {
+        create_dir_all(parent)?;
+    }
+    write(path, format!("send_method = {}", config.send_method))
+}
 
 pub fn human_readable_size(size: u64) -> String {
     const UNITS: [&str; 6] = ["bytes", "KB", "MB", "GB", "TB", "PB"];
@@ -66,7 +106,67 @@ pub fn get_file_type(path: &Path) -> &'static str {
     match ext_str {
         "rs" => "Rust file",
         "py" => "Python file",
-        // ... rest of the file type matches ...
+        "js" => "JavaScript file",
+        "java" => "Java file",
+        "c" => "C file",
+        "cpp" | "cc" => "C++ file",
+        "h" | "hpp" => "Header file",
+        "kt" => "Kotlin file",
+        "ts" => "Typescript",
+        "sh" | "bash" | "zsh" => "Shell script",
+        "bashrc" | "zshrc" | "profile" | "zprofile" | "bash_profile" => "Shell init script",
+        "txt" => "Text file",
+        "gitignore" => "gitignore file",
+        "zip" => "zip file",
+        "so" => "Shared object file",
+        "dll" => "Data linked library",
+        "exe" => "Windows executable",
+        "mp3" => "MP3 Audio file",
+        "m4a" => "m4a Audio file",
+        "mp4" => "MP4 Video file",
+        "m4v" => "m4v Video file",
+        "mov" => "mov Video file",
+        "desktop" => "Linux desktop meta file",
+        "bin" => "Binary file",
+        "png" => "PNG Image",
+        "flac" => "flac Audio File",
+        "jpeg" | "jpg" => "JPEG Image",
+        "blob" => "blob file",
+        "tsx" => "Typescript react file",
+        "jsx" => "Javascript react file",
+        "yaml" | "yml" => "yaml file",
+        "toml" => "toml file",
+        "cs" => "C# file",
+        "html" => "html file",
+        "lua" => "lua file",
+        "dart" => "dart file",
+        "go" => "go file",
+        "conf" => "Config file",
+        "css" => "css file",
+        "json" => "json file",
+        "asm" | "s" => "Assembly file",
+        "m" => "Objective C file",
+        "zig" => "zig file",
+        "gradle" => "gradle file",
+        "php" => "php file",
+        "rb" => "ruby",
+        "md" => "markdown",
+        "AppImage" => "App image file",
+        "ld" => "Linker script",
+        "jkr" => "Balatro joker save file",
+        "bepis" => "Ultrakill save file",
+        "love" => "Love game",
+        "qml" => "Qt markup language file",
+        "svg" => "SVG image",
+        "ttf" => "ttf font",
+        "otf" => "otf font",
+        "gif" => "gif file",
+        "iso" => "Installation media file",
+        "patch" | "diff" => "Diff file",
+        "smali" => "Android smali file",
+        "cmake" => "cmake source code file",
+        "sql" | "sqlite" | "sqlite3" => "SQL database",
+        "db" => "Database file",
         _ => "file",
     }
 }

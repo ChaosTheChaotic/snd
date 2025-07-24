@@ -9,6 +9,7 @@ pub struct HostInfo {
 #[derive(Debug)]
 pub struct DM {
     pub host_info: HostInfo,
+    pub send_method: String,
     pub file_path: String,
     pub file_type: String,
     pub file_size: u64,
@@ -31,8 +32,13 @@ impl fmt::Display for DM {
         let size_str = crate::utils::human_readable_size(self.file_size);
         write!(
             f,
-            "From {} with ip {} and {}: {} with size {}",
-            self.host_info.name, self.host_info.ip, self.file_type, self.file_path, size_str
+            "From {} with ip {} and {}: {} with size {} using send method: {}",
+            self.host_info.name,
+            self.host_info.ip,
+            self.file_type,
+            self.file_path,
+            size_str,
+            self.send_method
         )
     }
 }

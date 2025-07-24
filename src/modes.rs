@@ -1,12 +1,14 @@
-use crate::cli::colored_rec_h;
-use crate::network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT};
-use crate::tui::*;
-use crate::types::*;
-use crate::utils::{downloadfc, expand_path, extract_hostname, gen_cname, get_file_type};
+use crate::{
+    cli::colored_rec_h,
+    network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
+    tui::*,
+    types::{HostInfo, ShModes, DM},
+    utils::{downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config},
+};
 use colored::Colorize;
 use std::{
-    fs::File,
     ffi::{c_char, CStr},
+    fs::File,
     io::{self, Write},
     net::{SocketAddr, UdpSocket},
     os::unix::fs::MetadataExt,
@@ -37,8 +39,8 @@ pub fn prompt(shtyp: ShModes, cname: String) {
             }
         });
 
-        // Start listener thread with original socket
-        let recv_socket = socket; // Use original socket for receiving
+        let recv_socket = socket; // Use original socket for receiving due to errors with binding
+                                  // to the same addr multiple times
         thread::spawn(move || {
             let mut buf = [0; 1024];
             loop {
@@ -48,45 +50,45 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                         if message.starts_with("DIRECTH: HMCHNE; ") {
                             const PREFIX: &str = "DIRECTH: HMCHNE; ";
                             let rest = &message[PREFIX.len()..].trim();
-                            let tokens: Vec<&str> = rest.split("; ").collect();
+                            let tokens: Vec<&str> = rest.split(';').map(|s| s.trim()).collect();
+                            let wfile_idx = tokens.iter().position(|&t| t == "WFILE");
+                            let wtyp_idx = tokens.iter().position(|&t| t == "WTYP");
+                            let wsz_idx = tokens.iter().position(|&t| t == "WSZ");
+                            let sndm_idx = tokens.iter().position(|&t| t == "SNDM");
 
-                            // Find WFILE marker position
-                            if let Some(wfile_idx) = tokens.iter().position(|&t| t == "WFILE") {
-                                // Ensure enough tokens after WFILE
-                                if tokens.len() < wfile_idx + 5 {
-                                    eprintln!("Invalid message: not enough tokens after WFILE");
-                                    return;
+                            if let (
+                                Some(wfile_idx),
+                                Some(wtyp_idx),
+                                Some(wsz_idx),
+                                Some(sndm_idx),
+                            ) = (wfile_idx, wtyp_idx, wsz_idx, sndm_idx)
+                            {
+                                if wtyp_idx > wfile_idx
+                                    && wsz_idx > wtyp_idx
+                                    && sndm_idx > wsz_idx
+                                    && wtyp_idx < tokens.len()
+                                    && wsz_idx < tokens.len()
+                                    && sndm_idx < tokens.len()
+                                {
+                                    let hostname = tokens[0..wfile_idx].join("; ");
+                                    let file_path = tokens[wfile_idx + 1..wtyp_idx].join("; ");
+                                    let file_type = tokens[wtyp_idx + 1];
+                                    let file_size = tokens[wsz_idx + 1].parse::<u64>().unwrap_or(0);
+                                    let send_method = tokens[sndm_idx + 1].to_string();
+
+                                    // Add DM to list
+                                    let mut guard = direct_clone.lock().unwrap();
+                                    guard.push(DM {
+                                        host_info: HostInfo {
+                                            name: hostname,
+                                            ip: source.ip(),
+                                        },
+                                        file_path: file_path.to_string(),
+                                        file_type: file_type.to_string(),
+                                        file_size,
+                                        send_method,
+                                    });
                                 }
-
-                                // Extract fields based on marker positions
-                                let hostname = tokens[0..wfile_idx].join("; ");
-                                let file_path = tokens[wfile_idx + 1];
-
-                                // Verify WTYP marker
-                                if tokens[wfile_idx + 2] != "WTYP" {
-                                    eprintln!("Expected WTYP marker after file path");
-                                    return;
-                                }
-                                let file_type = tokens[wfile_idx + 3];
-
-                                // Verify WSZ marker
-                                if tokens[wfile_idx + 4] != "WSZ" {
-                                    eprintln!("Expected WSZ marker after file type");
-                                    return;
-                                }
-                                let file_size = tokens[wfile_idx + 5].parse::<u64>().unwrap_or(0);
-
-                                // Add DM to list
-                                let mut guard = direct_clone.lock().unwrap();
-                                guard.push(DM {
-                                    host_info: HostInfo {
-                                        name: hostname,
-                                        ip: source.ip(),
-                                    },
-                                    file_path: file_path.to_string(),
-                                    file_type: file_type.to_string(),
-                                    file_size,
-                                });
                             } else {
                                 eprintln!("WFILE marker not found in message");
                             }
@@ -239,11 +241,12 @@ fn snd_mode_tui() {
     send_to_ip(
         target_ip,
         format!(
-            "DIRECTH: HMCHNE; {}; WFILE; {}; WTYP; {}; WSZ; {}",
+            "DIRECTH: HMCHNE; {}; WFILE; {}; WTYP; {}; WSZ; {}; SNDM; {}",
             gen_cname(),
             abspath,
             get_file_type(Path::new(&abspath)),
-            std::fs::metadata(Path::new(&abspath)).unwrap().size()
+            std::fs::metadata(Path::new(&abspath)).unwrap().size(),
+            read_config().send_method,
         ),
     );
 
@@ -294,7 +297,11 @@ fn snd_mode_tui() {
                             } else {
                                 println!("Sent FSNT; to {}", source);
                             }
-                            send_file(File::open(file_path).expect("Failed to open file"), source);
+                            send_file(
+                                File::open(file_path).expect("Failed to open file"),
+                                source,
+                                read_config().send_method,
+                            );
                         } else {
                             println!("{}", "Transfer canceled".yellow());
                         }
@@ -361,8 +368,6 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
     let dm = &guard[idx];
     println!("{}: {}", "You selected".green(), dm);
 
-    // Send acceptance message to the sender
-    //let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind");
     let socket = UdpSocket::bind(("0.0.0.0", 0)).expect("Failed to bind");
     let target = SocketAddr::new(dm.host_info.ip, PORT);
     let msg = format!("ACCEPT: {}; FROM: {}", dm.file_path, gen_cname());
@@ -371,35 +376,95 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
         eprintln!("Failed to send acceptance: {}", e);
     } else {
         println!(
-            "{} {} {} {}",
+            "{} {} {} {} {} {}",
             "Request sent to".green(),
             dm.host_info.name.blue().bold(),
             "to send".green(),
-            dm.file_path.blue().bold()
+            dm.file_path.blue().bold(),
+            "using mode".green(),
+            dm.send_method.blue().bold(),
         );
     }
-    let mut buf = [0; 1024];
+    let mut buf = [0; 1400];
     match socket.recv_from(&mut buf) {
-        Ok((size, source)) => {
+        Ok((size, _)) => {
             let msg = String::from_utf8_lossy(&buf[..size]).to_string();
-            if msg.trim() == "FSNT;" {
-                println!("{}", "File being sent!".green());
-                let mut fp: File = downloadfc(&Path::new(&dm.file_path));
-                let mut size_buf = [0u8; 8];
-                socket.recv_from(&mut size_buf).expect("Failed to receive file size");
-                let file_size = u64::from_be_bytes(size_buf);
-                let mut remaining = file_size;
-                let mut chunk_buf = [0u8; 1024];
+    if msg.trim() == "FSNT;" {
+        println!(
+            "{} {}",
+            "File being sent through".green(),
+            dm.send_method.blue()
+        );
+        let mut fp: File = downloadfc(&Path::new(&dm.file_path));
+        let mut size_buf = [0u8; 8];
+        socket
+            .recv_from(&mut size_buf)
+            .expect("Failed to receive file size");
+        let file_size = u64::from_be_bytes(size_buf);
+        let mut remaining = file_size;
+        let mut chunk_buf = [0u8; 1500];
+        
+        let mut next_expected_seq = 0;
+
+        while remaining > 0 {
+            let (count, src) = socket
+                .recv_from(&mut chunk_buf)
+                .expect("Failed to receive chunk");
+
+            let (seq_num, data) = if dm.send_method == "semi-reliable" {
+                if count < 8 {
+                    eprintln!("Packet too small, skipping");
+                    continue;
+                }
+                let seq_bytes = &chunk_buf[0..8];
+                let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
+                (seq_num, &chunk_buf[8..count])
+            } else {
+                (0, &chunk_buf[..count])
+            };
+
+            if dm.send_method == "semi-reliable" {
+                // Skip duplicate packets
+                if seq_num < next_expected_seq {
+                    // Still ACK duplicates to prevent retries
+                    let ack = seq_num.to_be_bytes();
+                    if let Err(e) = socket.send_to(&ack, src) {
+                        eprintln!("Failed to send ACK: {}", e);
+                    }
+                    continue;
+                }
                 
-                while remaining > 0 {
-                    let (count, _) = socket.recv_from(&mut chunk_buf)
-                        .expect("Failed to receive chunk");
-                    fp.write_all(&chunk_buf[..count])
-                        .expect("Failed to write chunk");
-                    remaining -= count as u64;
+                // Skip out-of-order packets
+                if seq_num != next_expected_seq {
+                    eprintln!("Out-of-order packet: expected {}, got {}", next_expected_seq, seq_num);
+                    continue;
                 }
             }
-        },
-        Err(e) => eprintln!("Receive error: {}", e)
+
+            let data_len = data.len();
+            if data_len > 0 {
+                let write_size = std::cmp::min(remaining, data_len as u64) as usize;
+                fp.write_all(&data[..write_size])
+                    .expect("Failed to write chunk");
+                remaining -= write_size as u64;
+            }
+
+            if dm.send_method == "semi-reliable" {
+                next_expected_seq += 1;
+                
+                // Send ACK with sequence number
+                let ack = seq_num.to_be_bytes();
+                if let Err(e) = socket.send_to(&ack, src) {
+                    eprintln!("Failed to send ACK: {}", e);
+                }
+            }
+
+            if remaining == 0 {
+                break;
+            }
+        }
+    }
+        }
+        Err(e) => eprintln!("Receive error: {}", e),
     }
 }
