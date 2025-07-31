@@ -42,3 +42,8 @@ impl fmt::Display for DM {
         )
     }
 }
+
+pub struct Config {
+    pub send_method: String,
+    pub follow_symlinks: bool,
+}

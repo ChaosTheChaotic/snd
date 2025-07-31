@@ -34,6 +34,11 @@ void setHostnames(char **hstnmes, int count) {
 
   hostname_count = count;
   hostnames = malloc(count * sizeof(char *));
+  if (!hostnames) {
+    endwin();
+    fprintf(stderr, "Failed to malloc");
+    exit(1);
+  }
 
   for (int i = 0; i < count; i++) {
     hostnames[i] = strdup(hstnmes[i]);
@@ -107,6 +112,7 @@ char *runTUI() {
   int ch;
   while (1) {
     ch = getch();
+    refresh();
     switch (ch) {
     case 'q':
       termTUI();

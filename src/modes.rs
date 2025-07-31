@@ -1,22 +1,29 @@
 use crate::{
+    c::{
+        diskman::du,
+        tui::{initTUI, runTUI, termTUI, update_tui_hostnames},
+    },
     cli::colored_rec_h,
     network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
-    tui::*,
     types::{HostInfo, ShModes, DM},
-    utils::{downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config},
+    utils::{
+        downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config, tarify,
+    },
 };
 use colored::Colorize;
+use flate2::read::GzDecoder;
 use std::{
-    ffi::{c_char, CStr},
-    fs::File,
+    ffi::{c_char, CStr, CString},
+    fs::{remove_file, File},
     io::{self, Write},
     net::{SocketAddr, UdpSocket},
-    os::unix::fs::MetadataExt,
+    //os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
+use tar::Archive;
 
 pub fn prompt(shtyp: ShModes, cname: String) {
     if matches!(shtyp, ShModes::REC) {
@@ -166,6 +173,10 @@ fn snd_mode_tui() {
         }
     }
 
+    if exp.is_dir() {
+        exp = tarify(exp.to_string_lossy().to_string());
+    }
+
     let abspath: String = exp.to_string_lossy().to_string();
     println!("{} is a valid file at {}!", res.trim(), abspath);
 
@@ -245,7 +256,15 @@ fn snd_mode_tui() {
             gen_cname(),
             abspath,
             get_file_type(Path::new(&abspath)),
-            std::fs::metadata(Path::new(&abspath)).unwrap().size(),
+            //std::fs::metadata(Path::new(&abspath)).unwrap().size(),
+            unsafe {
+                du(
+                    CString::new(abspath.as_str())
+                        .expect("Failed to convert to CString")
+                        .as_ptr(),
+                    read_config().follow_symlinks,
+                )
+            }, // Jesus christ this took forever to work out
             read_config().send_method,
         ),
     );
@@ -302,6 +321,9 @@ fn snd_mode_tui() {
                                 source,
                                 read_config().send_method,
                             );
+                            if get_file_type(Path::new(&abspath)) == "directory" {
+                                remove_file(&exp).expect("Failed to remove temporary tarball")
+                            }
                         } else {
                             println!("{}", "Transfer canceled".yellow());
                         }
@@ -389,82 +411,92 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
     match socket.recv_from(&mut buf) {
         Ok((size, _)) => {
             let msg = String::from_utf8_lossy(&buf[..size]).to_string();
-    if msg.trim() == "FSNT;" {
-        println!(
-            "{} {}",
-            "File being sent through".green(),
-            dm.send_method.blue()
-        );
-        let mut fp: File = downloadfc(&Path::new(&dm.file_path));
-        let mut size_buf = [0u8; 8];
-        socket
-            .recv_from(&mut size_buf)
-            .expect("Failed to receive file size");
-        let file_size = u64::from_be_bytes(size_buf);
-        let mut remaining = file_size;
-        let mut chunk_buf = [0u8; 1500];
-        
-        let mut next_expected_seq = 0;
+            if msg.trim() == "FSNT;" {
+                println!(
+                    "{} {}",
+                    "File being sent through".green(),
+                    dm.send_method.blue()
+                );
+                let mut fp: File = downloadfc(&Path::new(&dm.file_path));
+                let mut size_buf = [0u8; 8];
+                socket
+                    .recv_from(&mut size_buf)
+                    .expect("Failed to receive file size");
+                let file_size = u64::from_be_bytes(size_buf);
+                let mut remaining = file_size;
+                let mut chunk_buf = [0u8; 1500];
 
-        while remaining > 0 {
-            let (count, src) = socket
-                .recv_from(&mut chunk_buf)
-                .expect("Failed to receive chunk");
+                let mut next_expected_seq = 0;
 
-            let (seq_num, data) = if dm.send_method == "semi-reliable" {
-                if count < 8 {
-                    eprintln!("Packet too small, skipping");
-                    continue;
-                }
-                let seq_bytes = &chunk_buf[0..8];
-                let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
-                (seq_num, &chunk_buf[8..count])
-            } else {
-                (0, &chunk_buf[..count])
-            };
+                while remaining > 0 {
+                    let (count, src) = socket
+                        .recv_from(&mut chunk_buf)
+                        .expect("Failed to receive chunk");
 
-            if dm.send_method == "semi-reliable" {
-                // Skip duplicate packets
-                if seq_num < next_expected_seq {
-                    // Still ACK duplicates to prevent retries
-                    let ack = seq_num.to_be_bytes();
-                    if let Err(e) = socket.send_to(&ack, src) {
-                        eprintln!("Failed to send ACK: {}", e);
+                    let (seq_num, data) = if dm.send_method == "semi-reliable" {
+                        if count < 8 {
+                            eprintln!("Packet too small, skipping");
+                            continue;
+                        }
+                        let seq_bytes = &chunk_buf[0..8];
+                        let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
+                        (seq_num, &chunk_buf[8..count])
+                    } else {
+                        (0, &chunk_buf[..count])
+                    };
+
+                    if dm.send_method == "semi-reliable" {
+                        // Skip duplicate packets
+                        if seq_num < next_expected_seq {
+                            // Still ACK duplicates to prevent retries
+                            let ack = seq_num.to_be_bytes();
+                            if let Err(e) = socket.send_to(&ack, src) {
+                                eprintln!("Failed to send ACK: {}", e);
+                            }
+                            continue;
+                        }
+
+                        // Skip out-of-order packets
+                        if seq_num != next_expected_seq {
+                            eprintln!(
+                                "Out-of-order packet: expected {}, got {}",
+                                next_expected_seq, seq_num
+                            );
+                            continue;
+                        }
                     }
-                    continue;
-                }
-                
-                // Skip out-of-order packets
-                if seq_num != next_expected_seq {
-                    eprintln!("Out-of-order packet: expected {}, got {}", next_expected_seq, seq_num);
-                    continue;
-                }
-            }
 
-            let data_len = data.len();
-            if data_len > 0 {
-                let write_size = std::cmp::min(remaining, data_len as u64) as usize;
-                fp.write_all(&data[..write_size])
-                    .expect("Failed to write chunk");
-                remaining -= write_size as u64;
-            }
+                    let data_len = data.len();
+                    if data_len > 0 {
+                        let write_size = std::cmp::min(remaining, data_len as u64) as usize;
+                        fp.write_all(&data[..write_size])
+                            .expect("Failed to write chunk");
+                        remaining -= write_size as u64;
+                    }
 
-            if dm.send_method == "semi-reliable" {
-                next_expected_seq += 1;
-                
-                // Send ACK with sequence number
-                let ack = seq_num.to_be_bytes();
-                if let Err(e) = socket.send_to(&ack, src) {
-                    eprintln!("Failed to send ACK: {}", e);
+                    if dm.send_method == "semi-reliable" {
+                        next_expected_seq += 1;
+
+                        // Send ACK with sequence number
+                        let ack = seq_num.to_be_bytes();
+                        if let Err(e) = socket.send_to(&ack, src) {
+                            eprintln!("Failed to send ACK: {}", e);
+                        }
+                    }
+
+                    if remaining == 0 {
+                        break;
+                    }
                 }
             }
-
-            if remaining == 0 {
-                break;
-            }
-        }
-    }
         }
         Err(e) => eprintln!("Receive error: {}", e),
+    }
+    if dm.file_type == "directory" {
+        let tar_gz = File::open(&dm.file_path).expect("Failed to open tar archive");
+        let tar = GzDecoder::new(tar_gz);
+        let mut archive = Archive::new(tar);
+        archive.unpack(".").expect("Failed to unpack tar archive");
+        let _ = remove_file(&dm.file_path).expect("Failed to remove tar archive");
     }
 }

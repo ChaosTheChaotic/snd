@@ -7,10 +7,11 @@ use colored::Colorize;
 
 pub fn colorize_help() -> String {
     format!(
-        "{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}",
+        "{}\n{}{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}",
         "snd:".yellow().bold(),
         "--[(h)elp|(V)ersion|(r)ec|(s)nd|(c)onfig]".green(),
         "\n\nCommands parsed in the order listed, first recognised flag will be run\n\n",
+        "The file size is approx and can be off by a bit (this issue is mostly with folders)",
         "help:".yellow().bold(),
         "Prints this help message".cyan(),
         "\n",
@@ -51,47 +52,75 @@ fn handle_config_subcommand(args: &[String]) -> String {
             "{}\n{}\n\n  {}: {}\n    {}\n\n  {}: {}\n    {}\n\n{}\n{}",
             "Available settings:".yellow().bold(),
             format!("(Stored at: {})", path.display()).dimmed(),
-            "1. legacy".green().bold(),
-            config.send_method == "legacy",
-            "Reliable for small files but looses info for larger files".cyan(),
-            "2. semi-reliable".green().bold(),
-            config.send_method == "semi-reliable",
-            "Uses the same method as legacy but with extra protections to ensure most of the file gets through, generally much slower than legacy due to the wait times for ACK response".cyan(),
-            "Send methods will always be decided based on who is sending the file, this means even with conflicting send methods, the method of the sender takes priority".yellow(),
-            "To change: --config set <1|2>".yellow(),
+            "1. send_method".green().bold(),
+            config.send_method,
+            "Legacy is faster at the cost of reliablity, semi-reliable is slower but more reliable"
+                .cyan(),
+            "2. follow_symlinks".green().bold(),
+            config.follow_symlinks,
+            "Follow symbolic links when calculating file sizes".cyan(),
+            "Send methods will always be decided based on who is sending the file".yellow(),
+            "To change: --config set <key> <value>".yellow(),
         )
-    } else if args.len() >= 2 && args[0] == "set" {
-        let choice = &args[1];
-        let new_value = match choice.as_str() {
-            "1" => "legacy",
-            "2" => "semi-reliable",
+    } else if args.len() >= 3 && args[0] == "set" {
+        let key = &args[1];
+        let value = &args[2];
+        let mut config = read_config();
+
+        match key.as_str() {
+            "send_method" => {
+                config.send_method = match value.as_str() {
+                    "legacy" | "1" => "legacy",
+                    "semi-reliable" | "2" => "semi-reliable",
+                    _ => {
+                        return format!(
+                            "{}\n{}",
+                            "Invalid value for send_method!".red(),
+                            "Valid options: legacy, semi-reliable".yellow()
+                        );
+                    }
+                }
+                .to_string();
+            }
+            "follow_symlinks" => {
+                config.follow_symlinks = match value.as_str() {
+                    "true" | "1" => true,
+                    "false" | "0" => false,
+                    _ => {
+                        return format!(
+                            "{}\n{}",
+                            "Invalid value for follow_symlinks!".red(),
+                            "Valid options: true, false".yellow()
+                        );
+                    }
+                };
+            }
             _ => {
                 return format!(
                     "{}\n{}",
-                    "Invalid choice! Use:".red(),
-                    "--config set <1|2>\n  1 = legacy\n  2 = semi-reliable".yellow()
+                    "Invalid config key!".red(),
+                    "Valid keys: send_method, follow_symlinks".yellow()
                 );
             }
-        };
+        }
 
-        let mut config = read_config();
-        config.send_method = new_value.to_string();
         if let Err(e) = write_config(&config) {
             return format!("{}: {}", "Failed to save config".red(), e);
         }
 
         format!(
-            "{} {} {}\n{}",
-            "Send method set to".green(),
-            new_value.bright_cyan().bold(),
-            "successfully!".green(),
+            "{} {} = {}\n{}",
+            "Config setting".green(),
+            key.bright_cyan().bold(),
+            value.bright_cyan().bold(),
             format!("(Updated at: {})", get_config_path().display()).dimmed()
         )
     } else {
         format!(
             "{}\n{}",
             "Invalid config command".red(),
-            "Usage:\n  --config: View settings\n  --config set <1|2>: Change send method".yellow()
+            "Usage:\n  --config: View settings\n  --config set <key> <value>: Change setting"
+                .yellow()
         )
     }
 }

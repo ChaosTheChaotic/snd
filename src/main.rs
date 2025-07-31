@@ -1,7 +1,7 @@
+mod c;
 mod cli;
 mod modes;
 mod network;
-mod tui;
 mod types;
 mod utils;
 

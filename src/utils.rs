@@ -1,15 +1,14 @@
+use crate::types::Config;
 use dirs::{config_dir, download_dir};
+use flate2::{read::GzEncoder, Compression};
 use gethostname::gethostname;
 use std::{
-    env,
+    env::{self, temp_dir},
     ffi::OsStr,
     fs::{create_dir_all, read_to_string, write, File},
     path::{Path, PathBuf},
 };
-
-pub struct Config {
-    pub send_method: String,
-}
+use tar::Builder;
 
 pub fn get_config_path() -> PathBuf {
     let mut path = config_dir().expect("Could not find config directory");
@@ -20,19 +19,24 @@ pub fn get_config_path() -> PathBuf {
 
 pub fn read_config() -> Config {
     let path = get_config_path();
+    let mut follow_symlinks = false;
+    let mut send_method = "semi-reliable".to_string();
+
     if path.exists() {
         if let Ok(contents) = read_to_string(&path) {
             for line in contents.lines() {
                 if let Some(value) = line.strip_prefix("send_method = ") {
-                    return Config {
-                        send_method: value.trim().to_string(),
-                    };
+                    send_method = value.trim().to_string();
+                }
+                if let Some(value) = line.strip_prefix("follow_symlinks = ") {
+                    follow_symlinks = value.trim() == "true";
                 }
             }
         }
     }
     Config {
-        send_method: "semi-reliable".to_string(),
+        send_method,
+        follow_symlinks,
     }
 }
 
@@ -41,7 +45,13 @@ pub fn write_config(config: &Config) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         create_dir_all(parent)?;
     }
-    write(path, format!("send_method = {}", config.send_method))
+    write(
+        path,
+        format!(
+            "send_method = {}\nfollow_symlinks = {}",
+            config.send_method, config.follow_symlinks
+        ),
+    )
 }
 
 pub fn human_readable_size(size: u64) -> String {
@@ -118,6 +128,7 @@ pub fn get_file_type(path: &Path) -> &'static str {
         "txt" => "Text file",
         "gitignore" => "gitignore file",
         "zip" => "zip file",
+        "tar" => "tarball",
         "so" => "Shared object file",
         "dll" => "Data linked library",
         "exe" => "Windows executable",
@@ -207,4 +218,16 @@ pub fn downloadfc(full_path: &Path) -> File {
     let nname = dld.join(fname);
     let fp: File = File::create(nname).expect("Failed to create file");
     return fp;
+}
+
+// This function creates a tar file but does not remove it. Removing it should be handled by any
+// code that calls this
+pub fn tarify(fpath: String) -> PathBuf {
+    let tarfpth = temp_dir().join(format!("{}.tar.gz", &fpath));
+    let tarfp = File::create(&tarfpth).expect("Failed to create temp file");
+    let enc = GzEncoder::new(tarfp, Compression::default());
+    let mut tar = Builder::new(enc);
+    tar.append_dir_all("", &fpath)
+        .expect("Failed to add directory to archive");
+    return tarfpth;
 }
