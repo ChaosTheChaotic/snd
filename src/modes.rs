@@ -7,10 +7,11 @@ use crate::{
     network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
     types::{HostInfo, ShModes, DM},
     utils::{
-        downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config, tarify,
+        downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config, tarify, fpre
     },
 };
 use colored::Colorize;
+use dirs::download_dir;
 use flate2::read::GzDecoder;
 use std::{
     ffi::{c_char, CStr, CString},
@@ -101,6 +102,7 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                             }
                         }
                     }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(e) => eprintln!("Error receiving message: {}", e),
                 }
             }
@@ -173,9 +175,13 @@ fn snd_mode_tui() {
         }
     }
 
-    if exp.is_dir() {
-        exp = tarify(exp.to_string_lossy().to_string());
-    }
+    let ftype = if exp.is_dir() {
+        let tar_path = tarify(exp.to_string_lossy().to_string());
+        exp = tar_path;
+        "directory".to_string()
+    } else {
+        get_file_type(&exp).to_string()
+    };
 
     let abspath: String = exp.to_string_lossy().to_string();
     println!("{} is a valid file at {}!", res.trim(), abspath);
@@ -218,6 +224,7 @@ fn snd_mode_tui() {
                         update_tui_hostnames(&names);
                     }
                 }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue, // Handle EINTR
                 Err(e)
                     if e.kind() == io::ErrorKind::WouldBlock
                         || e.kind() == io::ErrorKind::TimedOut =>
@@ -255,7 +262,7 @@ fn snd_mode_tui() {
             "DIRECTH: HMCHNE; {}; WFILE; {}; WTYP; {}; WSZ; {}; SNDM; {}",
             gen_cname(),
             abspath,
-            get_file_type(Path::new(&abspath)),
+            ftype,
             //std::fs::metadata(Path::new(&abspath)).unwrap().size(),
             unsafe {
                 du(
@@ -332,6 +339,7 @@ fn snd_mode_tui() {
                     }
                 }
             }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue, // Handle EINTR
             Err(e)
                 if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
@@ -417,7 +425,7 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
                     "File being sent through".green(),
                     dm.send_method.blue()
                 );
-                let mut fp: File = downloadfc(&Path::new(&dm.file_path));
+                let (mut fp, saved_path) = downloadfc(&Path::new(&dm.file_path));
                 let mut size_buf = [0u8; 8];
                 socket
                     .recv_from(&mut size_buf)
@@ -486,6 +494,22 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
 
                     if remaining == 0 {
                         break;
+                    }
+                }
+                fp.flush().expect("Failed to flush file");
+                drop(fp);
+                if dm.file_type == "directory" {
+                    let file = File::open(&saved_path).expect("Failed to open tar archive");
+                    let tar = GzDecoder::new(file);
+                    let mut archive = Archive::new(tar);
+                    let sname: String = fpre(&saved_path).unwrap_or_default().to_string_lossy().to_string();
+                    let sfpth = format!("{}/{}", download_dir().unwrap_or_default().to_string_lossy().to_string(), sname);
+                    std::fs::create_dir(&sfpth).expect("Failed to create dir to unpack the tar into");
+                    if let Err(e) = archive.unpack(sfpth) {
+                        eprintln!("Failed to unpack tar archive: {}", e);
+                        eprintln!("The tar file is located at: {}", saved_path.display());
+                    } else {
+                        remove_file(&saved_path).expect("Failed to remove tar archive");
                     }
                 }
             }

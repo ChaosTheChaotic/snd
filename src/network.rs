@@ -3,7 +3,7 @@ use colored::Colorize;
 use if_addrs::IfAddr;
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{ErrorKind, Read, Seek, SeekFrom},
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     time::Duration,
 };
@@ -148,6 +148,7 @@ fn send_file_semi_reliable(mut file: File, target: SocketAddr) {
                         }
                     }
                 }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(e) => {
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::TimedOut

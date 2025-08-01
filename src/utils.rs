@@ -1,12 +1,9 @@
 use crate::types::Config;
 use dirs::{config_dir, download_dir};
-use flate2::{read::GzEncoder, Compression};
+use flate2::{write::GzEncoder, Compression};
 use gethostname::gethostname;
 use std::{
-    env::{self, temp_dir},
-    ffi::OsStr,
-    fs::{create_dir_all, read_to_string, write, File},
-    path::{Path, PathBuf},
+    env::{self, temp_dir}, ffi::OsStr, fs::{create_dir_all, read_to_string, write, File}, path::{Path, PathBuf}
 };
 use tar::Builder;
 
@@ -212,22 +209,56 @@ pub fn extract_hostname(message: &str) -> String {
     message.trim_end_matches('!').to_string()
 }
 
-pub fn downloadfc(full_path: &Path) -> File {
+pub fn downloadfc(full_path: &Path) -> (File, PathBuf) {
     let fname: &OsStr = full_path.file_name().unwrap_or_default();
     let dld = download_dir().unwrap_or_default();
     let nname = dld.join(fname);
-    let fp: File = File::create(nname).expect("Failed to create file");
-    return fp;
+    let fp: File = File::create(&nname).expect("Failed to create file");
+    (fp, nname)
 }
 
 // This function creates a tar file but does not remove it. Removing it should be handled by any
 // code that calls this
 pub fn tarify(fpath: String) -> PathBuf {
-    let tarfpth = temp_dir().join(format!("{}.tar.gz", &fpath));
+    let dir_name = Path::new(&fpath)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("temp_dir");
+    
+    let tarfpth = temp_dir().join(format!("{}.tar.gz", dir_name));
     let tarfp = File::create(&tarfpth).expect("Failed to create temp file");
     let enc = GzEncoder::new(tarfp, Compression::default());
     let mut tar = Builder::new(enc);
     tar.append_dir_all("", &fpath)
         .expect("Failed to add directory to archive");
-    return tarfpth;
+    tar.finish().expect("Failed to finish writing to the archive");
+    tarfpth
+}
+
+// Stolen from rust path source code since its a nightly only feature and im not bothered.
+fn split_file_at_dot(file: &OsStr) -> (&OsStr, Option<&OsStr>) {
+    let slice = file.as_encoded_bytes();
+    if slice == b".." {
+        return (file, None);
+    }
+    // The unsafety here stems from converting between &OsStr and &[u8]
+    // and back. This is safe to do because (1) we only look at ASCII
+    // contents of the encoding and (2) new &OsStr values are produced
+    // only from ASCII-bounded slices of existing &OsStr values.
+    let i = match slice[1..].iter().position(|b| *b == b'.') {
+        Some(i) => i + 1,
+        None => return (file, None),
+    };
+    let before = &slice[..i];
+    let after = &slice[i + 1..];
+    unsafe {
+        (
+            OsStr::from_encoded_bytes_unchecked(before),
+            Some(OsStr::from_encoded_bytes_unchecked(after)),
+        )
+    }
+}
+
+pub fn fpre(fpath: &Path) -> Option<&OsStr> {
+    fpath.file_name().map(split_file_at_dot).and_then(|(before, _after)| Some(before))
 }

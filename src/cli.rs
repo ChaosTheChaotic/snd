@@ -5,9 +5,23 @@ use crate::{
 };
 use colored::Colorize;
 
+pub fn colored_rec_h() -> String {
+    format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "exit:".yellow().bold(),
+        "Exits the program".cyan(),
+        "help:".yellow().bold(),
+        "Prints this message".cyan(),
+        "vdms:".yellow().bold(),
+        "View all received direct messages".cyan(),
+        "rec".yellow().bold(),
+        "Accepts a dm from the machine, takes in the index of the wanted message as a param".cyan(),
+    )
+}
+
 pub fn colorize_help() -> String {
     format!(
-        "{}\n{}{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}",
+        "{}\n{}{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n{}{}{}\n",
         "snd:".yellow().bold(),
         "--[(h)elp|(V)ersion|(r)ec|(s)nd|(c)onfig]".green(),
         "\n\nCommands parsed in the order listed, first recognised flag will be run\n\n",
@@ -26,20 +40,8 @@ pub fn colorize_help() -> String {
         "\n",
         "config:".yellow().bold(),
         "View or change settings".cyan(),
-    )
-}
-
-pub fn colored_rec_h() -> String {
-    format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-        "exit:".yellow().bold(),
-        "Exits the program".cyan(),
-        "help:".yellow().bold(),
-        "Prints this message".cyan(),
-        "vdms:".yellow().bold(),
-        "View all received direct messages".cyan(),
-        "rec".yellow().bold(),
-        "Accepts a dm from the machine, takes in the index of the wanted message as a param".cyan(),
+        "\n  To change: --config set <key> <value>".yellow(),
+        "\n  To reset: --config reset".yellow(),
     )
 }
 
@@ -49,7 +51,7 @@ fn handle_config_subcommand(args: &[String]) -> String {
         let path = get_config_path();
 
         format!(
-            "{}\n{}\n\n  {}: {}\n    {}\n\n  {}: {}\n    {}\n\n{}\n{}",
+            "{}\n{}\n\n  {}: {}\n    {}\n\n  {}: {}\n    {}\n\n{}\n{}\n{}",
             "Available settings:".yellow().bold(),
             format!("(Stored at: {})", path.display()).dimmed(),
             "1. send_method".green().bold(),
@@ -61,36 +63,45 @@ fn handle_config_subcommand(args: &[String]) -> String {
             "Follow symbolic links when calculating file sizes".cyan(),
             "Send methods will always be decided based on who is sending the file".yellow(),
             "To change: --config set <key> <value>".yellow(),
+            "To reset: --config reset".yellow(),
         )
-    } else if args.len() >= 3 && args[0] == "set" {
-        let key = &args[1];
-        let value = &args[2];
+    } else if args[0] == "set" {
+        if args.len() < 3 {
+            return format!(
+                "{}\n{}",
+                "Invalid config command".red(),
+                "Usage: --config set <key> <value>\n  Example: --config set send_method legacy"
+                    .yellow()
+            );
+        }
+
+        let key = &args[1].to_lowercase();
+        let value = &args[2].to_lowercase();
         let mut config = read_config();
 
         match key.as_str() {
             "send_method" => {
                 config.send_method = match value.as_str() {
-                    "legacy" | "1" => "legacy",
-                    "semi-reliable" | "2" => "semi-reliable",
+                    "legacy" | "1" => "legacy".to_string(),
+                    "semi-reliable" | "2" => "semi-reliable".to_string(),
                     _ => {
                         return format!(
                             "{}\n{}",
                             "Invalid value for send_method!".red(),
-                            "Valid options: legacy, semi-reliable".yellow()
+                            "Valid options: legacy (or 1), semi-reliable (or 2)".yellow()
                         );
                     }
-                }
-                .to_string();
+                };
             }
             "follow_symlinks" => {
                 config.follow_symlinks = match value.as_str() {
-                    "true" | "1" => true,
-                    "false" | "0" => false,
+                    "true" | "1" | "yes" | "on" => true,
+                    "false" | "0" | "no" | "off" => false,
                     _ => {
                         return format!(
                             "{}\n{}",
                             "Invalid value for follow_symlinks!".red(),
-                            "Valid options: true, false".yellow()
+                            "Valid options: true/yes/1, false/no/0".yellow()
                         );
                     }
                 };
@@ -115,11 +126,27 @@ fn handle_config_subcommand(args: &[String]) -> String {
             value.bright_cyan().bold(),
             format!("(Updated at: {})", get_config_path().display()).dimmed()
         )
+    } else if args[0] == "reset" {
+        let default_config = crate::types::Config {
+            send_method: "semi-reliable".to_string(),
+            follow_symlinks: false,
+        };
+
+        if let Err(e) = write_config(&default_config) {
+            return format!("{}: {}", "Failed to reset config".red(), e);
+        }
+
+        format!(
+            "{}\n{}\n{}",
+            "Config reset to default values:".green(),
+            format!("  send_method = {}", default_config.send_method),
+            format!("  follow_symlinks = {}", default_config.follow_symlinks)
+        )
     } else {
         format!(
             "{}\n{}",
             "Invalid config command".red(),
-            "Usage:\n  --config: View settings\n  --config set <key> <value>: Change setting"
+            "Usage:\n  --config: View settings\n  --config set <key> <value>: Change setting\n  --config reset: Reset to default"
                 .yellow()
         )
     }
