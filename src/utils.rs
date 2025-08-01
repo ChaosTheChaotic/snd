@@ -3,7 +3,10 @@ use dirs::{config_dir, download_dir};
 use flate2::{write::GzEncoder, Compression};
 use gethostname::gethostname;
 use std::{
-    env::{self, temp_dir}, ffi::OsStr, fs::{create_dir_all, read_to_string, write, File}, path::{Path, PathBuf}
+    env::{self, temp_dir},
+    ffi::OsStr,
+    fs::{create_dir_all, read_to_string, write, File},
+    path::{Path, PathBuf},
 };
 use tar::Builder;
 
@@ -224,14 +227,15 @@ pub fn tarify(fpath: String) -> PathBuf {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("temp_dir");
-    
+
     let tarfpth = temp_dir().join(format!("{}.tar.gz", dir_name));
     let tarfp = File::create(&tarfpth).expect("Failed to create temp file");
     let enc = GzEncoder::new(tarfp, Compression::default());
     let mut tar = Builder::new(enc);
     tar.append_dir_all("", &fpath)
         .expect("Failed to add directory to archive");
-    tar.finish().expect("Failed to finish writing to the archive");
+    tar.finish()
+        .expect("Failed to finish writing to the archive");
     tarfpth
 }
 
@@ -260,5 +264,8 @@ fn split_file_at_dot(file: &OsStr) -> (&OsStr, Option<&OsStr>) {
 }
 
 pub fn fpre(fpath: &Path) -> Option<&OsStr> {
-    fpath.file_name().map(split_file_at_dot).and_then(|(before, _after)| Some(before))
+    fpath
+        .file_name()
+        .map(split_file_at_dot)
+        .and_then(|(before, _after)| Some(before))
 }
