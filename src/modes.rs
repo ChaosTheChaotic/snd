@@ -57,8 +57,8 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                     Ok((size, source)) => {
                         let message = String::from_utf8_lossy(&buf[..size]).to_string();
                         if message.starts_with("DIRECTH: HMCHNE; ") {
-                            const PREFIX: &str = "DIRECTH: HMCHNE; ";
-                            let rest = &message[PREFIX.len()..].trim();
+                            const PFX: &str = "DIRECTH: HMCHNE; ";
+                            let rest = &message[PFX.len()..].trim();
                             let tokens: Vec<&str> = rest.split(';').map(|s| s.trim()).collect();
                             let wfile_idx = tokens.iter().position(|&t| t == "WFILE");
                             let wtyp_idx = tokens.iter().position(|&t| t == "WTYP");
@@ -505,12 +505,5 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
             }
         }
         Err(e) => eprintln!("Receive error: {}", e),
-    }
-    if dm.file_type == "directory" {
-        let tar_gz = File::open(&dm.file_path).expect("Failed to open tar archive");
-        let tar = GzDecoder::new(tar_gz);
-        let mut archive = Archive::new(tar);
-        archive.unpack(".").expect("Failed to unpack tar archive");
-        let _ = remove_file(&dm.file_path).expect("Failed to remove tar archive");
     }
 }
