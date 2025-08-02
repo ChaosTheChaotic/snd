@@ -1,15 +1,14 @@
 project(diskman C)
 
-add_library(diskman SHARED diskman.c)
+add_library(diskman STATIC diskman.c)  # Build as static library
 
-# Install the library to a predictable location
-install(TARGETS diskman
-    LIBRARY DESTINATION ${CMAKE_BINARY_DIR}/lib
-    RUNTIME DESTINATION ${CMAKE_BINARY_DIR}/lib
-)
-
-# Also set the build-time location
-set_target_properties(diskman PROPERTIES 
+# Set output directories for all platforms
+set_target_properties(diskman PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+)
+
+install(TARGETS diskman
+    ARCHIVE DESTINATION ${CMAKE_BINARY_DIR}/lib
 )
