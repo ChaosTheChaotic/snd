@@ -7,7 +7,8 @@ use crate::{
     network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
     types::{HostInfo, ShModes, DM},
     utils::{
-        downloadfc, expand_path, extract_hostname, gen_cname, get_file_type, read_config, tarify, fpre
+        downloadfc, expand_path, extract_hostname, fpre, gen_cname, get_file_type, read_config,
+        tarify,
     },
 };
 use colored::Colorize;
@@ -175,7 +176,7 @@ fn snd_mode_tui() {
         }
     }
 
-    let ftype = if exp.is_dir() {
+    let ftyp = if exp.is_dir() {
         let tar_path = tarify(exp.to_string_lossy().to_string());
         exp = tar_path;
         "directory".to_string()
@@ -262,7 +263,7 @@ fn snd_mode_tui() {
             "DIRECTH: HMCHNE; {}; WFILE; {}; WTYP; {}; WSZ; {}; SNDM; {}",
             gen_cname(),
             abspath,
-            ftype,
+            ftyp,
             //std::fs::metadata(Path::new(&abspath)).unwrap().size(),
             unsafe {
                 du(
@@ -502,9 +503,20 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
                     let file = File::open(&saved_path).expect("Failed to open tar archive");
                     let tar = GzDecoder::new(file);
                     let mut archive = Archive::new(tar);
-                    let sname: String = fpre(&saved_path).unwrap_or_default().to_string_lossy().to_string();
-                    let sfpth = format!("{}/{}", download_dir().unwrap_or_default().to_string_lossy().to_string(), sname);
-                    std::fs::create_dir(&sfpth).expect("Failed to create dir to unpack the tar into");
+                    let sname: String = fpre(&saved_path)
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let sfpth = format!(
+                        "{}/{}",
+                        download_dir()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string(),
+                        sname
+                    );
+                    std::fs::create_dir(&sfpth)
+                        .expect("Failed to create dir to unpack the tar into");
                     if let Err(e) = archive.unpack(sfpth) {
                         eprintln!("Failed to unpack tar archive: {}", e);
                         eprintln!("The tar file is located at: {}", saved_path.display());

@@ -3,17 +3,16 @@ project(tui C)
 find_package(Curses REQUIRED)
 include_directories(${CURSES_INCLUDE_DIRS})
 
-add_library(tui SHARED tui.c)
+add_library(tui STATIC tui.c)  # Build as static library
 target_link_libraries(tui ${CURSES_LIBRARIES})
 
-# Install the library to a predictable location
-install(TARGETS tui
-    LIBRARY DESTINATION ${CMAKE_BINARY_DIR}/lib
-    RUNTIME DESTINATION ${CMAKE_BINARY_DIR}/lib
-)
-
-# Also set the build-time location
-set_target_properties(tui PROPERTIES 
+# Set output directories for all platforms
+set_target_properties(tui PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+)
+
+install(TARGETS tui
+    ARCHIVE DESTINATION ${CMAKE_BINARY_DIR}/lib
 )
