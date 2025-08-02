@@ -176,7 +176,7 @@ fn snd_mode_tui() {
         }
     }
 
-    let ftype = if exp.is_dir() {
+    let ftyp = if exp.is_dir() {
         let tar_path = tarify(exp.to_string_lossy().to_string());
         exp = tar_path;
         "directory".to_string()
@@ -263,7 +263,7 @@ fn snd_mode_tui() {
             "DIRECTH: HMCHNE; {}; WFILE; {}; WTYP; {}; WSZ; {}; SNDM; {}",
             gen_cname(),
             abspath,
-            ftype,
+            ftyp,
             //std::fs::metadata(Path::new(&abspath)).unwrap().size(),
             unsafe {
                 du(
