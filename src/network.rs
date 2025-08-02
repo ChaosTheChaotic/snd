@@ -1,11 +1,15 @@
-use crate::utils::{gen_cname, is_vpn};
+use crate::{
+    types::PendingPacket,
+    utils::{gen_cname, is_vpn},
+};
 use colored::Colorize;
 use if_addrs::IfAddr;
 use std::{
+    collections::VecDeque,
     fs::File,
-    io::{ErrorKind, Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const PORT: u16 = 58422;
@@ -87,90 +91,99 @@ fn send_file_legacy(mut file: File, target: SocketAddr) {
 
 fn send_file_semi_reliable(mut file: File, target: SocketAddr) {
     const CHUNK_SIZE: usize = 1392;
-    const INITIAL_TIMEOUT: u64 = 100;
-    const MAX_TIMEOUT: u64 = 2000;
+    const WINDOW_SIZE: usize = 32;
+    const INITIAL_TIMEOUT_MS: u64 = 100;
+    const MAX_TIMEOUT_MS: u64 = 2000;
 
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind to a port");
+    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind");
     socket
         .set_nonblocking(false)
         .expect("Failed to set blocking");
-    // Removed initial timeout setting here
+    socket
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .expect("Failed to set read timeout");
 
     let file_size = file.metadata().expect("Failed to get metadata").len();
     let size_bytes = file_size.to_be_bytes();
-
-    // Send file size first
     socket
         .send_to(&size_bytes, &target)
         .expect("Failed to send file size");
 
     let mut sent_bytes: u64 = 0;
     let mut sequence_number = 0u64;
-    let mut buffer = [0u8; CHUNK_SIZE + 8]; // Extra space for sequence number
+    let mut pending_packets = VecDeque::with_capacity(WINDOW_SIZE);
+    let mut timeout = INITIAL_TIMEOUT_MS;
 
-    while sent_bytes < file_size {
-        // Reset timeout to initial value for each new packet
-        let mut current_timeout = INITIAL_TIMEOUT;
-        socket
-            .set_read_timeout(Some(Duration::from_millis(current_timeout)))
-            .expect("Failed to set read timeout");
+    while sent_bytes < file_size || !pending_packets.is_empty() {
+        // Send new packets while window isn't full
+        while pending_packets.len() < WINDOW_SIZE && sent_bytes < file_size {
+            let mut buffer = vec![0u8; CHUNK_SIZE];
+            file.seek(SeekFrom::Start(sent_bytes))
+                .expect("Failed to seek file");
 
-        // Prepare chunk with sequence number
-        let seq_bytes = sequence_number.to_be_bytes();
-        buffer[0..8].copy_from_slice(&seq_bytes);
+            let read_size = file.read(&mut buffer).expect("Failed to read chunk");
+            buffer.truncate(read_size);
 
-        file.seek(SeekFrom::Start(sent_bytes))
-            .expect("Failed to seek file");
+            let seq_bytes = sequence_number.to_be_bytes();
+            let mut packet = Vec::with_capacity(8 + read_size);
+            packet.extend_from_slice(&seq_bytes);
+            packet.extend_from_slice(&buffer);
 
-        let read_size = file
-            .read(&mut buffer[8..])
-            .expect("Failed to read file chunk");
-
-        let chunk_end = 8 + read_size;
-        let packet = &buffer[..chunk_end];
-
-        let mut ack_received = false;
-
-        while !ack_received {
-            // Send the chunk
-            if let Err(e) = socket.send_to(packet, &target) {
+            if let Err(e) = socket.send_to(&packet, &target) {
                 eprintln!("Failed to send chunk: {}", e);
             }
 
-            // Wait for ACK
-            let mut ack_buffer = [0u8; 8];
-            match socket.recv_from(&mut ack_buffer) {
-                Ok((_, src)) => {
-                    if src == target {
-                        let received_seq = u64::from_be_bytes(ack_buffer);
-                        if received_seq == sequence_number {
-                            ack_received = true;
-                        }
-                    }
-                }
-                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut
-                    {
-                        // Timeout occurred, will retry
-                    } else {
-                        eprintln!("Receive error: {}", e);
-                    }
-                }
+            pending_packets.push_back(PendingPacket {
+                sequence_number,
+                data: packet,
+                last_sent: Instant::now(),
+                timeout_duration: Duration::from_millis(timeout),
+                retry_count: 0,
+            });
+
+            sent_bytes += read_size as u64;
+            sequence_number += 1;
+        }
+
+        // Receive ACKs
+        let mut ack_buffer = [0u8; 8];
+        while let Ok((size, src)) = socket.recv_from(&mut ack_buffer) {
+            if src != target {
+                continue;
             }
 
-            // Handle retry
-            if !ack_received {
-                current_timeout = (current_timeout * 2).min(MAX_TIMEOUT);
-                socket
-                    .set_read_timeout(Some(Duration::from_millis(current_timeout)))
-                    .expect("Failed to set read timeout");
+            if size == 8 {
+                let ack_seq = u64::from_be_bytes(ack_buffer);
+                if let Some(pos) = pending_packets
+                    .iter()
+                    .position(|p| p.sequence_number == ack_seq)
+                {
+                    pending_packets.remove(pos);
+                    // Reset timeout after successful ACK
+                    timeout = INITIAL_TIMEOUT_MS;
+                }
             }
         }
 
-        sent_bytes += read_size as u64;
-        sequence_number += 1;
+        // Handle timeouts and retransmissions
+        let now = Instant::now();
+        for packet in &mut pending_packets {
+            if now.duration_since(packet.last_sent) >= packet.timeout_duration {
+                if let Err(e) = socket.send_to(&packet.data, &target) {
+                    eprintln!("Failed to resend chunk: {}", e);
+                } else {
+                    packet.retry_count += 1;
+                    packet.last_sent = now;
+                    // Exponential backoff
+                    packet.timeout_duration = Duration::from_millis(
+                        (packet.timeout_duration.as_millis() as u64 * 2).min(MAX_TIMEOUT_MS),
+                    );
+                }
+            }
+        }
+
+        // Avoid busy waiting
+        std::thread::sleep(Duration::from_millis(1));
     }
 
     println!("{}", "File transfer complete!".green());

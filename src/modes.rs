@@ -434,67 +434,45 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
                 let file_size = u64::from_be_bytes(size_buf);
                 let mut remaining = file_size;
                 let mut chunk_buf = [0u8; 1500];
-
-                let mut next_expected_seq = 0;
+                let mut expected_seq = 0u64;
+                let mut received_packets = std::collections::BTreeMap::new();
+                const WINDOW_SIZE: u64 = 32;
 
                 while remaining > 0 {
                     let (count, src) = socket
                         .recv_from(&mut chunk_buf)
                         .expect("Failed to receive chunk");
 
-                    let (seq_num, data) = if dm.send_method == "semi-reliable" {
-                        if count < 8 {
-                            eprintln!("Packet too small, skipping");
-                            continue;
-                        }
-                        let seq_bytes = &chunk_buf[0..8];
-                        let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
-                        (seq_num, &chunk_buf[8..count])
-                    } else {
-                        (0, &chunk_buf[..count])
-                    };
-
-                    if dm.send_method == "semi-reliable" {
-                        // Skip duplicate packets
-                        if seq_num < next_expected_seq {
-                            // Still ACK duplicates to prevent retries
-                            let ack = seq_num.to_be_bytes();
-                            if let Err(e) = socket.send_to(&ack, src) {
-                                eprintln!("Failed to send ACK: {}", e);
-                            }
-                            continue;
-                        }
-
-                        // Skip out-of-order packets
-                        if seq_num != next_expected_seq {
-                            eprintln!(
-                                "Out-of-order packet: expected {}, got {}",
-                                next_expected_seq, seq_num
-                            );
-                            continue;
-                        }
+                    if count < 8 {
+                        continue; // Invalid packet
                     }
 
-                    let data_len = data.len();
-                    if data_len > 0 {
-                        let write_size = std::cmp::min(remaining, data_len as u64) as usize;
+                    let seq_bytes = &chunk_buf[0..8];
+                    let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
+                    let data = &chunk_buf[8..count];
+
+                    // Send ACK immediately
+                    let ack = seq_num.to_be_bytes();
+                    if socket.send_to(&ack, src).is_err() {
+                        eprintln!("Failed to send ACK");
+                    }
+
+                    // Only process packets in current window
+                    if seq_num >= expected_seq && seq_num < expected_seq + WINDOW_SIZE {
+                        received_packets.insert(seq_num, data.to_vec());
+                    }
+
+                    // Process in-order packets
+                    while let Some(data) = received_packets.remove(&expected_seq) {
+                        let write_size = std::cmp::min(remaining, data.len() as u64) as usize;
                         fp.write_all(&data[..write_size])
                             .expect("Failed to write chunk");
                         remaining -= write_size as u64;
-                    }
+                        expected_seq += 1;
 
-                    if dm.send_method == "semi-reliable" {
-                        next_expected_seq += 1;
-
-                        // Send ACK with sequence number
-                        let ack = seq_num.to_be_bytes();
-                        if let Err(e) = socket.send_to(&ack, src) {
-                            eprintln!("Failed to send ACK: {}", e);
+                        if remaining == 0 {
+                            break;
                         }
-                    }
-
-                    if remaining == 0 {
-                        break;
                     }
                 }
                 fp.flush().expect("Failed to flush file");

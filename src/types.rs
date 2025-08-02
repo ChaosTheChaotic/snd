@@ -1,4 +1,8 @@
-use std::{fmt, net::IpAddr};
+use std::{
+    fmt,
+    net::IpAddr,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug)]
 pub struct HostInfo {
@@ -46,4 +50,12 @@ impl fmt::Display for DM {
 pub struct Config {
     pub send_method: String,
     pub follow_symlinks: bool,
+}
+
+pub struct PendingPacket {
+    pub sequence_number: u64,
+    pub data: Vec<u8>,
+    pub last_sent: Instant,
+    pub timeout_duration: Duration,
+    pub retry_count: u32,
 }
