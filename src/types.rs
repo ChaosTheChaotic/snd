@@ -37,13 +37,14 @@ impl fmt::Display for DM {
         let size_str = crate::utils::fileparse::human_readable_size(self.file_size);
         write!(
             f,
-            "From {} with ip {} and {}: {} with size {} using send method: {}",
+            "Seconds since recv: {}; From {} with ip {} and {}: {} with size {} using send method: {}",
+            self.recv_time.elapsed().as_secs(),
             self.host_info.name,
             self.host_info.ip,
             self.file_type,
             self.file_path,
             size_str,
-            self.send_method
+            self.send_method,
         )
     }
 }
@@ -51,6 +52,7 @@ impl fmt::Display for DM {
 pub struct Config {
     pub send_method: String,
     pub follow_symlinks: bool,
+    pub dm_timeout_s: u64,
 }
 
 pub struct PendingPacket {

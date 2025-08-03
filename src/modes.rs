@@ -125,7 +125,7 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                 "help" => println!("{}", colored_rec_h()),
                 "vdms" => {
                     let mut guard = direct_messages.lock().unwrap();
-                    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(300));
+                    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(read_config().dm_timeout_s));
                     if guard.is_empty() {
                         println!("No direct messages received yet.");
                     } else {
@@ -371,7 +371,7 @@ pub fn sh_init(shtyp: ShModes) {
 
 fn rec(dms: Arc<Mutex<Vec<DM>>>) {
     let mut guard = dms.lock().unwrap();
-    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(300));
+    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(read_config().dm_timeout_s));
     if guard.is_empty() {
         println!("No direct messages received yet.");
         return;

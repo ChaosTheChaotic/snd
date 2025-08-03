@@ -13,7 +13,7 @@ pub fn colored_rec_h() -> String {
         "help:".yellow().bold(),
         "Prints this message".cyan(),
         "vdms:".yellow().bold(),
-        "View all received direct messages".cyan(),
+        "View all received direct messages, deleted after 300s to prevent large buildup".cyan(),
         "rec".yellow().bold(),
         "Accepts a dm from the machine, takes in the index of the wanted message as a param".cyan(),
     )
@@ -25,7 +25,7 @@ pub fn colorize_help() -> String {
         "snd:".yellow().bold(),
         "--[(h)elp|(V)ersion|(r)ec|(s)nd|(c)onfig]".green(),
         "\n\nCommands parsed in the order listed, first recognised flag will be run\n\n",
-        "The file size is approx and can be off by a bit (this issue is mostly with folders)",
+        "The file size is approx and can be off by a bit though is mostly accurate (this issue is mostly with folders)",
         "help:".yellow().bold(),
         "Prints this help message".cyan(),
         "\n",
@@ -106,11 +106,23 @@ fn handle_config_subcommand(args: &[String]) -> String {
                     }
                 };
             }
+            "dm_timeout_secs" => {
+                config.dm_timeout_s = match value.parse::<u64>() {
+                    Ok(val) if val > 0 => val,
+                    _ => {
+                        return format!(
+                            "{}\n{}",
+                            "Invalid value for dm_timeout_secs!".red(),
+                            "Must be a positive integer".yellow()
+                        );
+                    }
+                };
+            }
             _ => {
                 return format!(
                     "{}\n{}",
                     "Invalid config key!".red(),
-                    "Valid keys: send_method, follow_symlinks".yellow()
+                    "Valid keys: send_method, follow_symlinks, dm_timeout_s".yellow()
                 );
             }
         }
@@ -130,6 +142,7 @@ fn handle_config_subcommand(args: &[String]) -> String {
         let default_config = crate::types::Config {
             send_method: "semi-reliable".to_string(),
             follow_symlinks: false,
+            dm_timeout_s: 300,
         };
 
         if let Err(e) = write_config(&default_config) {
