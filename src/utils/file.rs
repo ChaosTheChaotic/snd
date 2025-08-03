@@ -1,13 +1,14 @@
+use crate::utils::fileparse::fpre;
 use dirs::download_dir;
-use flate2::{write::GzEncoder, Compression};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rand::Rng;
 use std::{
     env::temp_dir,
     ffi::OsStr,
-    fs::File,
+    fs::{remove_file, File},
     path::{Path, PathBuf},
 };
-use tar::Builder;
+use tar::{Archive, Builder};
 
 pub fn downloadfc(full_path: &Path) -> (File, PathBuf) {
     let fname = full_path.file_name().unwrap_or_else(|| OsStr::new("file"));
@@ -71,4 +72,27 @@ pub fn tarify(fpath: String) -> PathBuf {
     tar.finish()
         .expect("Failed to finish writing to the archive");
     tarfpth
+}
+
+pub fn untarify(saved_path: &Path) -> std::io::Result<()> {
+    let file = File::open(saved_path)?;
+    let tar = GzDecoder::new(file);
+    let mut archive = Archive::new(tar);
+
+    let sname = fpre(saved_path)
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let dl_dir = download_dir().unwrap_or_else(|| PathBuf::from("."));
+    let sfpth = dl_dir.join(&sname);
+
+    if !sfpth.exists() {
+        std::fs::create_dir_all(&sfpth)?;
+    }
+
+    archive.unpack(&sfpth)?;
+    remove_file(saved_path)?;
+
+    Ok(())
 }

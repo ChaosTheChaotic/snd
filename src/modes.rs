@@ -4,32 +4,40 @@ use crate::{
         tui::{initTUI, runTUI, termTUI, update_tui_hostnames},
     },
     cli::colored_rec_h,
-    network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
+    network::{begin_broadcast_with_socket, recv_file, send_file, send_to_ip, PORT},
     types::{HostInfo, ShModes, DM},
     utils::{
         config::read_config,
-        file::{downloadfc, tarify},
-        fileparse::{expand_path, fpre, get_file_type},
+        file::tarify,
+        fileparse::{expand_path, get_file_type},
         net::{extract_hostname, gen_cname},
     },
 };
 use colored::Colorize;
-use dirs::download_dir;
-use flate2::read::GzDecoder;
 use std::{
     ffi::{c_char, CStr, CString},
     fs::{remove_file, File},
     io::{self, Write},
     net::{SocketAddr, UdpSocket},
-    //os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
-use tar::Archive;
 
-pub fn prompt(shtyp: ShModes, cname: String) {
+fn print_prompt(shtyp: &ShModes, cname: &str) {
+    let mode_str = shtyp.to_string();
+    let colored_mode = match shtyp {
+        ShModes::REC => mode_str.red().bold(),
+        ShModes::SND => mode_str.green().bold(),
+    };
+    let colored_cname = cname.blue().bold();
+    let prompt = format!("[{}@{}]# ", colored_mode, colored_cname).bold();
+    print!("{}", prompt);
+    let _ = io::stdout().flush();
+}
+
+fn prompt(shtyp: ShModes, cname: String) {
     if matches!(shtyp, ShModes::REC) {
         let direct_messages: Arc<Mutex<Vec<DM>>> = Arc::new(Mutex::new(Vec::new()));
         let direct_clone = Arc::clone(&direct_messages);
@@ -125,7 +133,9 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                 "help" => println!("{}", colored_rec_h()),
                 "vdms" => {
                     let mut guard = direct_messages.lock().unwrap();
-                    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(read_config().dm_timeout_s));
+                    guard.retain(|dm| {
+                        dm.recv_time.elapsed() < Duration::from_secs(read_config().dm_timeout_s)
+                    });
                     if guard.is_empty() {
                         println!("No direct messages received yet.");
                     } else {
@@ -141,18 +151,6 @@ pub fn prompt(shtyp: ShModes, cname: String) {
             print_prompt(&shtyp, &cname);
         }
     }
-}
-
-fn print_prompt(shtyp: &ShModes, cname: &str) {
-    let mode_str = shtyp.to_string();
-    let colored_mode = match shtyp {
-        ShModes::REC => mode_str.red().bold(),
-        ShModes::SND => mode_str.green().bold(),
-    };
-    let colored_cname = cname.blue().bold();
-    let prompt = format!("[{}@{}]# ", colored_mode, colored_cname).bold();
-    print!("{}", prompt);
-    let _ = io::stdout().flush();
 }
 
 fn snd_mode_tui() {
@@ -369,7 +367,7 @@ pub fn sh_init(shtyp: ShModes) {
     }
 }
 
-fn rec(dms: Arc<Mutex<Vec<DM>>>) {
+pub fn rec(dms: Arc<Mutex<Vec<DM>>>) {
     let mut guard = dms.lock().unwrap();
     guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(read_config().dm_timeout_s));
     if guard.is_empty() {
@@ -424,94 +422,5 @@ fn rec(dms: Arc<Mutex<Vec<DM>>>) {
             dm.send_method.blue().bold(),
         );
     }
-    let mut buf = [0; 1400];
-    match socket.recv_from(&mut buf) {
-        Ok((size, _)) => {
-            let msg = String::from_utf8_lossy(&buf[..size]).to_string();
-            if msg.trim() == "FSNT;" {
-                println!(
-                    "{} {}",
-                    "File being sent through".green(),
-                    dm.send_method.blue()
-                );
-                let (mut fp, saved_path) = downloadfc(&Path::new(&dm.file_path));
-                let mut size_buf = [0u8; 8];
-                socket
-                    .recv_from(&mut size_buf)
-                    .expect("Failed to receive file size");
-                let file_size = u64::from_be_bytes(size_buf);
-                let mut remaining = file_size;
-                let mut chunk_buf = [0u8; 1500];
-                let mut expected_seq = 0u64;
-                let mut received_packets = std::collections::BTreeMap::new();
-                const WINDOW_SIZE: u64 = 32;
-
-                while remaining > 0 {
-                    let (count, src) = socket
-                        .recv_from(&mut chunk_buf)
-                        .expect("Failed to receive chunk");
-
-                    if count < 8 {
-                        continue; // Invalid packet
-                    }
-
-                    let seq_bytes = &chunk_buf[0..8];
-                    let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
-                    let data = &chunk_buf[8..count];
-
-                    // Send ACK immediately
-                    let ack = seq_num.to_be_bytes();
-                    if socket.send_to(&ack, src).is_err() {
-                        eprintln!("Failed to send ACK");
-                    }
-
-                    // Only process packets in current window
-                    if seq_num >= expected_seq && seq_num < expected_seq + WINDOW_SIZE {
-                        received_packets.insert(seq_num, data.to_vec());
-                    }
-
-                    // Process in-order packets
-                    while let Some(data) = received_packets.remove(&expected_seq) {
-                        let write_size = std::cmp::min(remaining, data.len() as u64) as usize;
-                        fp.write_all(&data[..write_size])
-                            .expect("Failed to write chunk");
-                        remaining -= write_size as u64;
-                        expected_seq += 1;
-
-                        if remaining == 0 {
-                            break;
-                        }
-                    }
-                }
-                fp.flush().expect("Failed to flush file");
-                drop(fp);
-                if dm.file_type == "directory" {
-                    let file = File::open(&saved_path).expect("Failed to open tar archive");
-                    let tar = GzDecoder::new(file);
-                    let mut archive = Archive::new(tar);
-                    let sname: String = fpre(&saved_path)
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    let sfpth = format!(
-                        "{}/{}",
-                        download_dir()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string(),
-                        sname
-                    );
-                    std::fs::create_dir(&sfpth)
-                        .expect("Failed to create dir to unpack the tar into");
-                    if let Err(e) = archive.unpack(sfpth) {
-                        eprintln!("Failed to unpack tar archive: {}", e);
-                        eprintln!("The tar file is located at: {}", saved_path.display());
-                    } else {
-                        remove_file(&saved_path).expect("Failed to remove tar archive");
-                    }
-                }
-            }
-        }
-        Err(e) => eprintln!("Receive error: {}", e),
-    }
+    recv_file(&socket, dm);
 }

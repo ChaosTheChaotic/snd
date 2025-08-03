@@ -1,14 +1,18 @@
 use crate::{
-    types::PendingPacket,
-    utils::net::{gen_cname, is_vpn},
+    types::{PendingPacket, DM},
+    utils::{
+        file::{downloadfc, untarify},
+        net::{gen_cname, is_vpn},
+    },
 };
 use colored::Colorize;
 use if_addrs::IfAddr;
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -187,4 +191,75 @@ fn send_file_semi_reliable(mut file: File, target: SocketAddr) {
     }
 
     println!("{}", "File transfer complete!".green());
+}
+
+pub fn recv_file(socket: &UdpSocket, dm: &DM) {
+    let mut buf = [0; 1400];
+    match socket.recv_from(&mut buf) {
+        Ok((size, _)) => {
+            let msg = String::from_utf8_lossy(&buf[..size]).to_string();
+            if msg.trim() == "FSNT;" {
+                println!(
+                    "{} {}",
+                    "File being sent through".green(),
+                    dm.send_method.blue()
+                );
+                let (mut fp, saved_path) = downloadfc(&Path::new(&dm.file_path));
+                let mut size_buf = [0u8; 8];
+                socket
+                    .recv_from(&mut size_buf)
+                    .expect("Failed to receive file size");
+                let file_size = u64::from_be_bytes(size_buf);
+                let mut remaining = file_size;
+                let mut chunk_buf = [0u8; 1500];
+                let mut expected_seq = 0u64;
+                let mut received_packets = std::collections::BTreeMap::new();
+                const WINDOW_SIZE: u64 = 32;
+
+                while remaining > 0 {
+                    let (count, src) = socket
+                        .recv_from(&mut chunk_buf)
+                        .expect("Failed to receive chunk");
+
+                    if count < 8 {
+                        continue; // Invalid packet
+                    }
+
+                    let seq_bytes = &chunk_buf[0..8];
+                    let seq_num = u64::from_be_bytes(seq_bytes.try_into().unwrap());
+                    let data = &chunk_buf[8..count];
+
+                    // Send ACK immediately
+                    let ack = seq_num.to_be_bytes();
+                    if socket.send_to(&ack, src).is_err() {
+                        eprintln!("Failed to send ACK");
+                    }
+
+                    // Only process packets in current window
+                    if seq_num >= expected_seq && seq_num < expected_seq + WINDOW_SIZE {
+                        received_packets.insert(seq_num, data.to_vec());
+                    }
+
+                    // Process in-order packets
+                    while let Some(data) = received_packets.remove(&expected_seq) {
+                        let write_size = std::cmp::min(remaining, data.len() as u64) as usize;
+                        fp.write_all(&data[..write_size])
+                            .expect("Failed to write chunk");
+                        remaining -= write_size as u64;
+                        expected_seq += 1;
+
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                }
+                fp.flush().expect("Failed to flush file");
+                drop(fp);
+                if dm.file_type == "directory" {
+                    untarify(&saved_path).expect("Failed to unpack tar archive");
+                }
+            }
+        }
+        Err(e) => eprintln!("Receive error: {}", e),
+    }
 }

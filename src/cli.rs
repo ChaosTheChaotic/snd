@@ -1,8 +1,4 @@
-use crate::{
-    modes::sh_init,
-    types::ShModes,
-    utils::config::handle_config_subcommand,
-};
+use crate::{modes::sh_init, types::ShModes, utils::config::handle_config_subcommand};
 use colored::Colorize;
 
 pub fn colored_rec_h() -> String {
@@ -44,7 +40,6 @@ pub fn colorize_help() -> String {
         "\n  To reset: --config reset".yellow(),
     )
 }
-
 
 pub fn parse(args: &[String]) -> String {
     for (index, arg) in args.iter().enumerate() {
