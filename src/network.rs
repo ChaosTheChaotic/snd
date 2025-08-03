@@ -1,6 +1,6 @@
 use crate::{
     types::PendingPacket,
-    utils::{gen_cname, is_vpn},
+    utils::net::{gen_cname, is_vpn},
 };
 use colored::Colorize;
 use if_addrs::IfAddr;

@@ -7,8 +7,10 @@ use crate::{
     network::{begin_broadcast_with_socket, send_file, send_to_ip, PORT},
     types::{HostInfo, ShModes, DM},
     utils::{
-        downloadfc, expand_path, extract_hostname, fpre, gen_cname, get_file_type, read_config,
-        tarify,
+        config::read_config,
+        file::{downloadfc, tarify},
+        fileparse::{expand_path, fpre, get_file_type},
+        net::{extract_hostname, gen_cname},
     },
 };
 use colored::Colorize;
@@ -96,7 +98,7 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                                         file_type: file_type.to_string(),
                                         file_size,
                                         send_method,
-                                        recv_time:Instant::now(),
+                                        recv_time: Instant::now(),
                                     });
                                 }
                             } else {
@@ -244,7 +246,9 @@ fn snd_mode_tui() {
         .to_str()
         .unwrap_or("Failed to get result from runTUI")
         .to_string();
-    unsafe { libc::free(thostnme as *mut libc::c_void); }
+    unsafe {
+        libc::free(thostnme as *mut libc::c_void);
+    }
 
     // Stop listener thread
     *stop_flag.lock().unwrap() = true;

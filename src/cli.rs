@@ -1,7 +1,7 @@
 use crate::{
     modes::sh_init,
     types::ShModes,
-    utils::{get_config_path, read_config, write_config},
+    utils::config::{get_config_path, read_config, write_config},
 };
 use colored::Colorize;
 

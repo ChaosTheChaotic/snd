@@ -34,7 +34,7 @@ impl fmt::Display for ShModes {
 
 impl fmt::Display for DM {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let size_str = crate::utils::human_readable_size(self.file_size);
+        let size_str = crate::utils::fileparse::human_readable_size(self.file_size);
         write!(
             f,
             "From {} with ip {} and {}: {} with size {} using send method: {}",
