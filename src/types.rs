@@ -53,6 +53,7 @@ pub struct Config {
     pub send_method: String,
     pub follow_symlinks: bool,
     pub dm_timeout_s: u64,
+    pub encrypt: bool,
 }
 
 pub struct PendingPacket {
