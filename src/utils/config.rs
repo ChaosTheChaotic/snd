@@ -54,8 +54,8 @@ pub fn write_config(config: &Config) -> std::io::Result<()> {
     write(
         path,
         format!(
-            "send_method = {}\nfollow_symlinks = {}\ndm_timeout_s = {}",
-            config.send_method, config.follow_symlinks, config.dm_timeout_s,
+            "send_method = {}\nfollow_symlinks = {}\ndm_timeout_s = {}\nencrypt = {}",
+            config.send_method, config.follow_symlinks, config.dm_timeout_s, config.encrypt,
         ),
     )
 }
@@ -66,15 +66,20 @@ pub fn handle_config_subcommand(args: &[String]) -> String {
         let path = get_config_path();
 
         format!(
-            "{}\n{}\n\n  {}: {}\n    {}\n\n  {}: {}\n    {}\n\n{}\n{}\n{}",
+            "{}\n{}\n\n  {}: {}\n    {}\n\n  {}: {}\n\n  {}: {}\n    {}\n\n  {}: {}\n    {}\n\n  {}\n\n{}\n{}\n{}",
             "Available settings:".yellow().bold(),
             format!("(Stored at: {})", path.display()).dimmed(),
             "1. send_method".green().bold(),
             config.send_method,
-            "Legacy is faster at the cost of reliablity, semi-reliable is slower but more reliable"
-                .cyan(),
+            "Legacy is faster at the cost of reliablity, semi-reliable is slower but more reliable".cyan(),
             "2. follow_symlinks".green().bold(),
             config.follow_symlinks,
+            "3. dm_timeout_s".green().bold(),
+            config.dm_timeout_s,
+            "The time it takes for the DM to be discarded in seconds".cyan(),
+            "4. encrypt".green().bold(),
+            config.encrypt,
+            "If we should encrypt travelling packets or not".cyan(),
             "Follow symbolic links when calculating file sizes".cyan(),
             "Send methods will always be decided based on who is sending the file".yellow(),
             "To change: --config set <key> <value>".yellow(),
@@ -121,7 +126,7 @@ pub fn handle_config_subcommand(args: &[String]) -> String {
                     }
                 };
             }
-            "dm_timeout_secs" => {
+            "dm_timeout_s" => {
                 config.dm_timeout_s = match value.parse::<u64>() {
                     Ok(val) if val > 0 => val,
                     _ => {
@@ -150,7 +155,7 @@ pub fn handle_config_subcommand(args: &[String]) -> String {
                 return format!(
                     "{}\n{}",
                     "Invalid config key!".red(),
-                    "Valid keys: send_method, follow_symlinks, dm_timeout_s".yellow()
+                    "Valid keys: send_method, follow_symlinks, dm_timeout_s, encrypt".yellow()
                 );
             }
         }
