@@ -17,6 +17,7 @@ pub struct DM {
     pub file_path: String,
     pub file_type: String,
     pub file_size: u64,
+    pub recv_time: Instant,
 }
 
 #[derive(Debug)]

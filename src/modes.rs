@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tar::Archive;
 
@@ -96,6 +96,7 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                                         file_type: file_type.to_string(),
                                         file_size,
                                         send_method,
+                                        recv_time:Instant::now(),
                                     });
                                 }
                             } else {
@@ -121,7 +122,8 @@ pub fn prompt(shtyp: ShModes, cname: String) {
                 "exit" => break,
                 "help" => println!("{}", colored_rec_h()),
                 "vdms" => {
-                    let guard = direct_messages.lock().unwrap();
+                    let mut guard = direct_messages.lock().unwrap();
+                    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(300));
                     if guard.is_empty() {
                         println!("No direct messages received yet.");
                     } else {
@@ -364,7 +366,8 @@ pub fn sh_init(shtyp: ShModes) {
 }
 
 fn rec(dms: Arc<Mutex<Vec<DM>>>) {
-    let guard = dms.lock().unwrap();
+    let mut guard = dms.lock().unwrap();
+    guard.retain(|dm| dm.recv_time.elapsed() < Duration::from_secs(300));
     if guard.is_empty() {
         println!("No direct messages received yet.");
         return;
