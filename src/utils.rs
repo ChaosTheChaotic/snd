@@ -2,6 +2,7 @@ use crate::types::Config;
 use dirs::{config_dir, download_dir};
 use flate2::{write::GzEncoder, Compression};
 use gethostname::gethostname;
+use rand::Rng;
 use std::{
     env::{self, temp_dir},
     ffi::OsStr,
@@ -213,11 +214,47 @@ pub fn extract_hostname(message: &str) -> String {
 }
 
 pub fn downloadfc(full_path: &Path) -> (File, PathBuf) {
-    let fname: &OsStr = full_path.file_name().unwrap_or_default();
-    let dld = download_dir().unwrap_or_default();
-    let nname = dld.join(fname);
-    let fp: File = File::create(&nname).expect("Failed to create file");
-    (fp, nname)
+    let fname = full_path
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("file"));
+    let dld = download_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut candidate = dld.join(fname);
+    let mut count = 0;
+
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return (file, candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                count += 1;
+                
+                let stem = full_path.file_stem().unwrap_or_else(|| OsStr::new("file"));
+                let extension = full_path.extension();
+                
+                let mut new_fname = std::ffi::OsString::with_capacity(32);
+                new_fname.push(stem);
+                new_fname.push("_");
+                new_fname.push(count.to_string());
+                
+                if let Some(ext) = extension {
+                    if !ext.is_empty() {
+                        new_fname.push(".");
+                        new_fname.push(ext);
+                    }
+                }
+                
+                candidate = dld.join(new_fname);
+
+                if count > 10000 {
+                    panic!("Failed to create file after 10000 attempts");
+                }
+            }
+            Err(e) => panic!("Failed to create file: {}", e),
+        }
+    }
 }
 
 // This function creates a tar file but does not remove it. Removing it should be handled by any
@@ -228,7 +265,10 @@ pub fn tarify(fpath: String) -> PathBuf {
         .and_then(|n| n.to_str())
         .unwrap_or("temp_dir");
 
-    let tarfpth = temp_dir().join(format!("{}.tar.gz", dir_name));
+    let random_bytes: [u8; 16] = rand::rng().random();
+    let random_suffix = hex::encode(random_bytes);
+
+    let tarfpth = temp_dir().join(format!("{}_{}.tar.gz", dir_name, random_suffix));
     let tarfp = File::create(&tarfpth).expect("Failed to create temp file");
     let enc = GzEncoder::new(tarfp, Compression::default());
     let mut tar = Builder::new(enc);

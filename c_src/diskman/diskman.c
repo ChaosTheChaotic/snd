@@ -62,6 +62,9 @@ int sum(const char *fpath, const struct stat *sb, int tflag,
 
 unsigned long long int du(char path[], bool fsym) {
   // Reset state for new traversal
+  free(seen_inodes);
+  seen_inodes = NULL;
+  seen_capacity = 0;
   total = 0;
   seen_count = 0;
 

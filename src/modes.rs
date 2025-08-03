@@ -242,6 +242,7 @@ fn snd_mode_tui() {
         .to_str()
         .unwrap_or("Failed to get result from runTUI")
         .to_string();
+    unsafe { libc::free(thostnme as *mut libc::c_void); }
 
     // Stop listener thread
     *stop_flag.lock().unwrap() = true;
