@@ -33,7 +33,7 @@ pub fn read_config() -> Config {
                     dm_timeout_s = value.trim().parse().unwrap_or(300);
                 }
                 if let Some(value) = line.strip_prefix("encrypt = ") {
-                    encrypt = value.trim() == "false";
+                    encrypt = value.trim() == "true";
                 }
             }
         }

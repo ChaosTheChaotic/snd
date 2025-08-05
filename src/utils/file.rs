@@ -60,10 +60,10 @@ pub fn tarify(fpath: String) -> PathBuf {
         .and_then(|n| n.to_str())
         .unwrap_or("temp_dir");
 
-    let random_bytes: [u8; 16] = rand::rng().random();
+    let random_bytes: [u8; 64] = rand::rng().random();
     let random_suffix = hex::encode(random_bytes);
 
-    let tarfpth = temp_dir().join(format!("{}_{}.tar.gz", dir_name, random_suffix));
+    let tarfpth = temp_dir().join(format!("{}_??{}.tar.gz", dir_name, random_suffix));
     let tarfp = File::create(&tarfpth).expect("Failed to create temp file");
     let enc = GzEncoder::new(tarfp, Compression::default());
     let mut tar = Builder::new(enc);
@@ -83,9 +83,10 @@ pub fn untarify(saved_path: &Path) -> std::io::Result<()> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
+    let fnameo = sname.split("_??").next().unwrap_or(&sname);
 
     let dl_dir = download_dir().unwrap_or_else(|| PathBuf::from("."));
-    let sfpth = dl_dir.join(&sname);
+    let sfpth = dl_dir.join(&fnameo);
 
     if !sfpth.exists() {
         std::fs::create_dir_all(&sfpth)?;
