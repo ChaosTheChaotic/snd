@@ -1,4 +1,4 @@
-use crate::utils::fileparse::fpre;
+use crate::utils::fileparse::{fpre, sanitize_file_name};
 use dirs::download_dir;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rand::Rng;
@@ -12,8 +12,9 @@ use tar::{Archive, Builder};
 
 pub fn downloadfc(full_path: &Path) -> (File, PathBuf) {
     let fname = full_path.file_name().unwrap_or_else(|| OsStr::new("file"));
+    let safe_name = sanitize_file_name(fname.to_str().unwrap_or("file"));
     let dld = download_dir().unwrap_or_else(|| PathBuf::from("."));
-    let mut candidate = dld.join(fname);
+    let mut candidate = dld.join(safe_name);
     let mut count = 0;
 
     loop {
@@ -84,9 +85,10 @@ pub fn untarify(saved_path: &Path) -> std::io::Result<()> {
         .to_string_lossy()
         .to_string();
     let fnameo = sname.split("_??").next().unwrap_or(&sname);
+    let sfnameo = sanitize_file_name(fnameo);
 
     let dl_dir = download_dir().unwrap_or_else(|| PathBuf::from("."));
-    let sfpth = dl_dir.join(&fnameo);
+    let sfpth = dl_dir.join(&sfnameo);
 
     if !sfpth.exists() {
         std::fs::create_dir_all(&sfpth)?;

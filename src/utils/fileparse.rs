@@ -161,3 +161,9 @@ pub fn fpre(fpath: &Path) -> Option<&OsStr> {
         .map(split_file_at_dot)
         .and_then(|(before, _after)| Some(before))
 }
+
+pub fn sanitize_file_name(name: &str) -> String {
+    name.replace(std::path::MAIN_SEPARATOR, "_")
+        .replace('/', "_")
+        .replace('\\', "_")
+}
